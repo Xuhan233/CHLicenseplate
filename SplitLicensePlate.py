@@ -2,7 +2,7 @@ import cv2 as cv
 import numpy as np
 
 #change the path for reading and saving image
-img_path = r'.\example1.jpg'
+img_path = r'.\example2.jpg'
 save_path = r'.\test'
 # remove the noise of image deduct the pixel value in the image which cut the similarly part in this image
 def absdiff(img):
