@@ -2,7 +2,7 @@ import cv2 as cv
 import numpy as np
 
 #change the path for reading and saving image
-img_path = r'.\example2.jpg'
+img_path = r'.\example1.jpg'
 save_path = r'.\test'
 # remove the noise of image deduct the pixel value in the image which cut the similarly part in this image
 def absdiff(img):
@@ -14,23 +14,30 @@ def absdiff(img):
     img_absdiff = cv.absdiff(img, img_opening)
     cv.imshow("Opening", img_opening)
     return img_absdiff
-# Binarization of the img
+
+# Binarization of the img the binarization is used to specify the color into black and white
+# To change the image into black and white can remove the large area of same part in the image
 def binarization(img):
-    maxi = float(img.max())
-    mini = float(img.min())
-    x = maxi - ((maxi - mini) / 2)
+    max = float(img.max())
+    min = float(img.min())
+    x = max - ((max - min) / 2)
     ret, img_binary = cv.threshold(img, x, 255, cv.THRESH_BINARY)
     return img_binary
-#To detect the edge of the license plate
+
+#To detect the edge of each same area. The edge of the lincense plate must be included.
+
 def canny(img):
     img_canny = cv.Canny(img, img.shape[0], img.shape[1])
     return img_canny
 
-# locate the license plate by opening and closing calculation of open cv
+# locate the license plate by opening and closing calculation of open cv The opening and closing calculation is
+# remove the small bright area which could remove the noise edge and area for reecongintion of license plate.
 def opening_closing(img):
+    kernal2 = np.ones((5,27),np.float64)
     kernel = np.ones((5, 23), np.uint8)
     img_closing = cv.morphologyEx(img, cv.MORPH_CLOSE, kernel)
     cv.imshow("Closing", img_closing)
+    kernal2 = kernel
     img_opening1 = cv.morphologyEx(img_closing, cv.MORPH_OPEN, kernel)
     cv.imshow("Opening_1", img_opening1)
     kernel = np.ones((11, 6), np.uint8)
@@ -39,40 +46,56 @@ def opening_closing(img):
 
 # Find the rectangular box of the license plate
 def find_rectangle(contour):
-    y, x = [], []
+    wedith, length = [], []
+    # to find the shape of area with a rectangle
     for p in contour:
-        y.append(p[0][0])
-        x.append(p[0][1])
-    return [min(y), min(x), max(y), max(x)]
-# Resize the image and set the scale to 400
+        wedith.append(p[0][0])
+        length.append(p[0][1])
+    out = [min(wedith), min(length), max(wedith), max(length)]
+    return out
+
+# Resize the image into fixed shape and pixel since the testing image might be different pixel and shape.
+# Resize the image and set the scale to 400 since 400 is the best pixel that openCV recommended.
 def resize_img(img, max_size):
-    h, w = img.shape[0:2]
-    scale = max_size / max(h, w)
-    img_resized = cv.resize(img, None, fx=scale, fy=scale,
+    height, wedigh = img.shape[0:2]
+    scale = max_size / max(height, wedigh)
+    # print(cv.resize(img, None, fx=scale, fy=scale,
+    #                             interpolation=cv.INTER_CUBIC))
+    return cv.resize(img, None, fx=scale, fy=scale,
                             interpolation=cv.INTER_CUBIC)
-    # print(img_resized.shape)
-    return img_resized
+
+
+
 
 # split the license plate out for a single picture
 def locate_license(original, img):
     contours, hierarchy = cv.findContours(img, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
-    img_cont = original.copy()
-    img_cont = cv.drawContours(img_cont, contours, -1, (255, 0, 0), 6)
-    cv.imshow("Contours", img_cont)
-    block = []
-    for c in contours:
-        r = find_rectangle(c)
-        a = (r[2] - r[0]) * (r[3] - r[1])
-        s = (r[2] - r[0]) / (r[3] - r[1])
-        block.append([r, a, s])
-    block = sorted(block, key=lambda bl: bl[1])[-5:]
-    maxweight, maxindex = 0, -1
-    for i in range(len(block)):
-        print('block', block[i])
-        if 2 <= block[i][2] <= 4 and 1000 <= block[i][1] <= 20000:  # 对矩形区域高宽比及面积进行限制
-            b = original[block[i][0][1]: block[i][0][3], block[i][0][0]: block[i][0][2]]
-            hsv = cv.cvtColor(b, cv.COLOR_BGR2HSV)
+    img_contours = original.copy()
+    img_contours = cv.drawContours(img_contours, contours, -1, (255, 0, 0), 6)
+    cv.imshow("Contours", img_contours)
+    # To calculate out the area of the image
+    area_locked = []
+    for im in contours:
+        ractangle = find_rectangle(im)
+        # To calculate out the ratio between length and width of the rectangle.
+        ratio = (ractangle[2] - ractangle[0]) / (ractangle[3] - ractangle[1])
+        # To find out the location of upper left conner and lower right corner to calculate out the area.
+        area = (ractangle[2] - ractangle[0]) * (ractangle[3] - ractangle[1]) # calculate out the area.
+        area_locked.append([ractangle, area, ratio])
+    # use the sorting algorithm to sort out the largest five area.
+    area_locked = sorted(area_locked, key=lambda bl: bl[1])[-5:]
+    # select the area by color since the chinese license plate was in blue/ yellow color.
+    # If want to recognize the yellow license plate change the blue index to yellow index.
+    max_w, max_i = 0, -1
+    for i in range(len(area_locked)):
+        print('block', area_locked[i])
+        # To limit the length and width's ratio.
+        if 2 <= area_locked[i][2] <= 4 and 1000 <= area_locked[i][1] <= 20000:
+            # to use thee threshold value to select the best area that most like the license plate out.
+            area = original[area_locked[i][0][1]: area_locked[i][0][3], area_locked[i][0][0]: area_locked[i][0][2]]
+            hsv = cv.cvtColor(area, cv.COLOR_BGR2HSV)
             lower = np.array([100, 50, 50])
+            mid = np.array([120,150,150])
             upper = np.array([140, 255, 255])
             mask = cv.inRange(hsv, lower, upper)
             w1 = 0
@@ -81,15 +104,14 @@ def locate_license(original, img):
             w2 = 0
             for n in w1:
                 w2 += n
-            if w2 > maxweight:
-                maxindex = i
-                maxweight = w2
+            if w2 > max_w:
+                max_i = i
+                max_w = w2
 
-    rect = block[maxindex][0]
+    rect = area_locked[max_i][0]
     return rect
 
-#Stretching the image
-#To strenthen the contrast ratio of the image
+#Stretching the image Strenting is aimed at  strenthen the contrast ratio of the image
 def stretching(img):
     maxi = float(img.max())
     mini = float(img.min())
@@ -129,42 +151,45 @@ def preprocessing(img):
     cv.imshow('License', img_copy)
     return rect, img_resized
 
+# To cut the plate out by the coordinate.
 def cut_license(original, rect):
-    license_img = original[rect[1]:rect[3], rect[0]:rect[2]]
-    return license_img
+    return original[rect[1]:rect[3], rect[0]:rect[2]]
 
-
+# find_waves function was used to remove all noise like screw of the license plate.
 def find_waves(threshold, histogram):
-    up_point = -1
     is_peak = False
+    up = -1
+    is_threshold = False
     if histogram[0] > threshold:
-        up_point = 0
+        up = 0
         is_peak = True
     wave_peaks = []
-    for i, x in enumerate(histogram):
-        if is_peak and x < threshold:
-            if i - up_point > 2:
+    for index, index1 in enumerate(histogram):
+        if is_peak and index1 < threshold:
+            if index - up > 2:
                 is_peak = False
-                wave_peaks.append((up_point, i))
-        elif not is_peak and x >= threshold:
+                is_threshold = False
+                wave_peaks.append((up, index))
+        elif not is_peak and index1 >= threshold:
             is_peak = True
-            up_point = i
-    if is_peak and up_point != -1 and i - up_point > 4:
-        wave_peaks.append((up_point, i))
+            is_threshold = True
+            up = index
+    if is_peak and up != -1 and index - up > 4:
+        wave_peaks.append((up, index))
     return wave_peaks
 
-
+# To remove the border of the license plate like the license plate frame.
 def remove_upanddown_border(img):
     plate_gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
     ret, plate_binary_img = cv.threshold(plate_gray, 0, 255, cv.THRESH_BINARY + cv.THRESH_OTSU)
-    row_histogram = np.sum(plate_binary_img, axis=1)  # 数组的每一行求和
-    row_min = np.min(row_histogram)
-    row_average = np.sum(row_histogram) / plate_binary_img.shape[0]
-    row_threshold = (row_min + row_average) / 2
-    wave_peaks = find_waves(row_threshold, row_histogram)
+    histogram = np.sum(plate_binary_img, axis=1)
+    min_row = np.min(histogram)
+    average = np.sum(histogram) / plate_binary_img.shape[0]
+    th = (min_row + average) / 2
+    peak = find_waves(th, histogram)
     wave_span = 0.0
     selected_wave = []
-    for wave_peak in wave_peaks:
+    for wave_peak in peak:
         span = wave_peak[1] - wave_peak[0]
         if span > wave_span:
             wave_span = span
@@ -182,33 +207,35 @@ def find_end(start, arg, black, white, width, black_max, white_max):
 
 # Separate the character out
 def char_segmentation(thresh):
-    white, black = [], []
+    max_w = 0
+    max_b = 0
+    partofwhite, partofblack = [], []
     height, width = thresh.shape
-    white_max = 0
-    black_max = 0
+
     for i in range(width):
-        line_white = 0
-        line_black = 0
+        countwhite = 0 #
+        countblack = 0
         for j in range(height):
             if thresh[j][i] == 255:
-                line_white += 1
+                countwhite += 1
             if thresh[j][i] == 0:
-                line_black += 1
-        white_max = max(white_max, line_white)
-        black_max = max(black_max, line_black)
-        white.append(line_white)
-        black.append(line_black)
-        # print('white_max', white_max)
-        # print('black_max', black_max)
+                countblack += 1
+        max_w = max(max_w, countwhite)
+        max_b = max(max_b, countblack)
+        partofwhite.append(countwhite)
+        partofblack.append(countblack)
+    # arg true means it was black background with white character
+    # are false means it was white background with black character
     arg = True
-    if black_max < white_max:
+    if max_b < max_w:
         arg = False
+    # split the character out.
     n = 1
     while n < width - 2:
         n += 1
-        if (white[n] if arg else black[n]) > (0.05 * white_max if arg else 0.05 * black_max):  # 这点没有理解透彻
+        if (partofwhite[n] if arg else partofblack[n]) > (0.05 * max_w if arg else 0.05 * max_b):
             start = n
-            end = find_end(start, arg, black, white, width, black_max, white_max)
+            end = find_end(start, arg, partofblack, partofwhite, width, max_b, max_w)
             n = end
             if end - start > 5 or end > (width * 3 / 7):
                 cropImg = thresh[0:height, start - 1:end + 1]
@@ -216,13 +243,13 @@ def char_segmentation(thresh):
                 cv.imwrite(save_path + '\\{}.bmp'.format(n), cropImg)
                 cv.imshow('Char_{}'.format(n), cropImg)
 def main():
-    image = cv.imread(img_path)
-    rect, img_resized = preprocessing(image)
-    license_img = cut_license(img_resized, rect)
-    cv.imshow('License', license_img)
-    plate_b_img = remove_upanddown_border(license_img)
-    cv.imshow('plate_binary', plate_b_img)
-    char_segmentation(plate_b_img)
+    original = cv.imread(img_path)
+    rectagular, img_resized = preprocessing(original)
+    plate_img = cut_license(img_resized, rectagular)
+    cv.imshow('Plate_cutted', plate_img)
+    character_img = remove_upanddown_border(plate_img)
+    cv.imshow('plate_in_binary', character_img)
+    char_segmentation(character_img)
     cv.waitKey(0)
     cv.destroyAllWindows()
 
